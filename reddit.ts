@@ -9,73 +9,175 @@ const server = new FastMCP({
 
 server.addTool({
   name: "searchReddit",
-  description: "Search for posts on Reddit by keyword",
+  description: "Search for posts or comments on Reddit by keyword",
   parameters: z.object({
-    query: z.string().describe("Search keyword or phrase"),
-    limit: z
+    type: z
+      .enum(["comment", "submission"])
+      .describe("Search type: comments or submissions"),
+    q: z.string().optional().describe("Search term (searches all fields)"),
+    ids: z
+      .string()
+      .optional()
+      .describe("Get specific items by comma-separated base36 IDs"),
+    size: z
       .number()
       .optional()
-      .default(10)
+      .default(100)
       .describe("Number of results to return (max 100)"),
     sort: z
-      .enum(["relevance", "hot", "new", "top", "comments"])
+      .enum(["asc", "desc"])
       .optional()
-      .default("relevance")
-      .describe("Sort method for results"),
-    time: z
-      .enum(["hour", "day", "week", "month", "year", "all"])
+      .default("desc")
+      .describe("Sort order"),
+    sort_type: z
+      .enum(["score", "num_comments", "created_utc"])
       .optional()
-      .default("all")
-      .describe("Time period for results"),
+      .default("created_utc")
+      .describe("Field to sort by"),
+    author: z.string().optional().describe("Restrict to a specific author"),
+    subreddit: z
+      .string()
+      .optional()
+      .describe("Restrict to a specific subreddit"),
+    after: z
+      .string()
+      .optional()
+      .describe("Return results after this date (epoch or Xd/Xh/Xm/Xs)"),
+    before: z
+      .string()
+      .optional()
+      .describe("Return results before this date (epoch or Xd/Xh/Xm/Xs)"),
+    link_id: z
+      .string()
+      .optional()
+      .describe(
+        "Return comments from a specific submission (for comment search only)"
+      ),
+
+    // Submission-specific parameters
+    title: z.string().optional().describe("Search in submission titles only"),
+    selftext: z
+      .string()
+      .optional()
+      .describe("Search in submission selftext only"),
+    score: z
+      .string()
+      .optional()
+      .describe("Filter by score (e.g., '>100', '<25')"),
+    num_comments: z
+      .string()
+      .optional()
+      .describe("Filter by number of comments (e.g., '>100')"),
+    over_18: z.boolean().optional().describe("Filter NSFW content"),
+    is_video: z.boolean().optional().describe("Filter video content"),
+    locked: z.boolean().optional().describe("Filter locked threads"),
+    stickied: z.boolean().optional().describe("Filter stickied content"),
+    spoiler: z.boolean().optional().describe("Filter spoiler content"),
+    contest_mode: z
+      .boolean()
+      .optional()
+      .describe("Filter contest mode submissions"),
   }),
   execute: async (args, context) => {
     try {
-      const url = new URL("https://www.reddit.com/search.json");
-      url.searchParams.set("q", args.query);
-      url.searchParams.set("limit", args.limit.toString());
-      url.searchParams.set("sort", args.sort);
-      url.searchParams.set("t", args.time);
+      const baseUrl = "https://api.pullpush.io/reddit/search/";
+      const endpoint = args.type + "/";
+      const url = new URL(baseUrl + endpoint);
+
+      // Add all provided parameters to the URL
+      Object.entries(args).forEach(([key, value]) => {
+        if (value !== undefined && key !== "type") {
+          url.searchParams.set(key, value.toString());
+        }
+      });
+
+      context.log.info(`Making request to: ${url.toString()}`);
 
       const response = await axios.get(url.toString(), {
-        headers: {
-          "User-Agent": "Reddit-Search-MCP/1.0.0",
-        },
+        timeout: 60000, // 60 second timeout
       });
 
-      const results = response.data.data.children.map((child) => {
-        const post = child.data;
+      if (
+        !response.data ||
+        !response.data.data ||
+        !Array.isArray(response.data.data)
+      ) {
         return {
-          title: post.title,
-          subreddit: post.subreddit_name_prefixed,
-          author: post.author,
-          created_utc: post.created_utc,
-          url: post.url,
-          permalink: `https://www.reddit.com${post.permalink}`,
-          num_comments: post.num_comments,
-          score: post.ups,
-          is_self: post.is_self,
-          selftext: post.selftext
-            ? post.selftext.substring(0, 300) +
-              (post.selftext.length > 300 ? "..." : "")
-            : "",
+          content: [
+            {
+              type: "text",
+              text: "No results found or invalid response format.",
+            },
+          ],
         };
-      });
+      }
 
-      const formattedResults = JSON.stringify(
-        {
-          results: results,
-          after: response.data.data.after,
-          count: results.length,
-        },
-        null,
-        2
-      );
+      const results = response.data.data.map((item) => {
+        if (args.type === "submission") {
+          return {
+            id: item.id,
+            title: item.title,
+            author: item.author,
+            subreddit: item.subreddit,
+            subreddit_id: item.subreddit_id,
+            score: item.score || item.ups,
+            created_utc: item.created_utc,
+            num_comments: item.num_comments,
+            permalink: item.permalink
+              ? `https://www.reddit.com${item.permalink}`
+              : null,
+            url: item.url,
+            selftext: item.selftext
+              ? item.selftext.length > 300
+                ? item.selftext.substring(0, 300) + "..."
+                : item.selftext
+              : "",
+            over_18: item.over_18,
+            is_video: item.is_video,
+            locked: item.locked,
+            stickied: item.stickied,
+            spoiler: item.spoiler,
+          };
+        } else {
+          return {
+            id: item.id,
+            author: item.author,
+            subreddit: item.subreddit,
+            subreddit_id: item.subreddit_id,
+            score: item.score || item.ups,
+            created_utc: item.created_utc,
+            permalink: item.permalink
+              ? `https://www.reddit.com${item.permalink}`
+              : null,
+            body: item.body
+              ? item.body.length > 300
+                ? item.body.substring(0, 300) + "..."
+                : item.body
+              : "",
+            link_id: item.link_id,
+            parent_id: item.parent_id,
+          };
+        }
+      });
 
       return {
         content: [
           {
             type: "text",
-            text: formattedResults,
+            text: JSON.stringify(
+              {
+                results,
+                count: results.length,
+                metadata: response.data.metadata || {
+                  total_results: results.length,
+                  size: args.size || 100,
+                  sort: args.sort || "desc",
+                  sort_type: args.sort_type || "created_utc",
+                },
+              },
+              null,
+              2
+            ),
           },
         ],
       };
@@ -86,6 +188,4 @@ server.addTool({
   },
 });
 
-server.start({
-  transportType: "stdio",
-});
+server.start({ transportType: "stdio" });
