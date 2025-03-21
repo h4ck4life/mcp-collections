@@ -310,6 +310,7 @@ server.addTool({
             headers: {
               "User-Agent": "FastMCP-Reddit-Comments/1.0.0",
             },
+            maxRedirects: 5,
           });
 
           context.log.info("API Response received", {
@@ -454,6 +455,170 @@ server.addTool({
       }
 
       throw new UserError(`Failed to get comments: ${error.message}`);
+    }
+  },
+});
+
+server.addTool({
+  name: "getRedditPost",
+  description: "Get details for a specific Reddit post by ID",
+  parameters: z.object({
+    postId: z.string().describe("The ID of the post to get details for"),
+  }),
+  execute: async (args, context) => {
+    try {
+      const baseUrl = `https://www.reddit.com/${args.postId}.json`;
+      const url = new URL(baseUrl);
+
+      context.log.info("Making request to Reddit API for post details", {
+        url: url.toString(),
+        postId: args.postId,
+      });
+
+      // Add retry logic
+      const maxRetries = 3;
+      let retries = 0;
+      let response;
+
+      while (retries < maxRetries) {
+        try {
+          response = await axios.get(url.toString(), {
+            timeout: 60000,
+            validateStatus: null,
+            headers: {
+              "User-Agent": "FastMCP-Reddit-Post/1.0.0",
+            },
+            maxRedirects: 5, // Follow redirects
+          });
+
+          context.log.info("API Response received", {
+            status: response.status,
+            statusText: response.statusText,
+          });
+
+          if (response.status >= 400) {
+            throw new Error(
+              `HTTP error ${response.status}: ${response.statusText}`
+            );
+          }
+
+          break;
+        } catch (error) {
+          retries++;
+
+          if (error.response) {
+            context.log.error("API Error details", {
+              status: error.response.status,
+              statusText: error.response.statusText,
+            });
+          } else {
+            context.log.error("Request error", {
+              message: error.message,
+            });
+          }
+
+          if (retries >= maxRetries) {
+            throw error;
+          }
+
+          const delay = 1000 * Math.pow(2, retries - 1);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+
+      if (!response || !response.data) {
+        throw new UserError("No response received from Reddit API");
+      }
+
+      // The response format may vary depending on whether the request was redirected
+      let post;
+      if (Array.isArray(response.data) && response.data.length > 0) {
+        // This is the format when accessing /comments/postId.json
+        post = response.data[0].data.children[0].data;
+      } else if (
+        response.data.data &&
+        response.data.data.children &&
+        response.data.data.children.length > 0
+      ) {
+        // This is the format when accessing a direct post
+        post = response.data.data.children[0].data;
+      } else {
+        throw new UserError("Invalid response format from Reddit API");
+      }
+
+      if (!post) {
+        throw new UserError(`Post with ID ${args.postId} not found`);
+      }
+
+      context.reportProgress({
+        progress: 100,
+        total: 100,
+      });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                post: {
+                  id: post.id,
+                  title: post.title,
+                  author: post.author,
+                  subreddit: post.subreddit,
+                  subreddit_id: post.subreddit_id,
+                  score: post.score || post.ups,
+                  upvote_ratio: post.upvote_ratio,
+                  created_utc: post.created_utc,
+                  num_comments: post.num_comments,
+                  permalink: post.permalink
+                    ? `https://www.reddit.com${post.permalink}`
+                    : null,
+                  url: post.url,
+                  domain: post.domain,
+                  selftext: post.selftext || "",
+                  over_18: post.over_18,
+                  is_video: post.is_video,
+                  media: post.media,
+                  thumbnail: post.thumbnail,
+                  locked: post.locked,
+                  stickied: post.stickied,
+                  spoiler: post.spoiler,
+                  gilded: post.gilded,
+                  contest_mode: post.contest_mode,
+                },
+                metadata: {
+                  postId: args.postId,
+                  retrieved_at: Math.floor(Date.now() / 1000),
+                },
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      context.log.error("Failed to get Reddit post", {
+        error: error.message,
+        stack: error.stack,
+        postId: args.postId,
+      });
+
+      if (error instanceof UserError) {
+        throw error;
+      }
+
+      if (error.response) {
+        const status = error.response.status;
+        if (status === 404) {
+          throw new UserError(`Post with ID ${args.postId} not found`);
+        } else {
+          throw new UserError(`Failed to get post: HTTP error ${status}`);
+        }
+      }
+
+      throw new UserError(`Failed to get post: ${error.message}`);
     }
   },
 });
