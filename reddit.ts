@@ -1,4 +1,4 @@
-import { FastMCP } from "fastmcp";
+import { FastMCP, imageContent, UserError } from "fastmcp";
 import { z } from "zod";
 import axios from "axios";
 
@@ -91,7 +91,7 @@ server.addTool({
         }
       });
 
-      context.log.info(`Making request to: ${url.toString()}`);
+      context.log.info("Making request to Reddit API", { url: url.toString() });
 
       const response = await axios.get(url.toString(), {
         timeout: 60000, // 60 second timeout
@@ -102,15 +102,13 @@ server.addTool({
         !response.data.data ||
         !Array.isArray(response.data.data)
       ) {
-        return {
-          content: [
-            {
-              type: "text",
-              text: "No results found or invalid response format.",
-            },
-          ],
-        };
+        throw new UserError("No results found or invalid response format");
       }
+
+      context.log.info("Retrieved results", {
+        count: response.data.data.length,
+        type: args.type,
+      });
 
       const results = response.data.data.map((item) => {
         if (args.type === "submission") {
@@ -160,6 +158,11 @@ server.addTool({
         }
       });
 
+      context.reportProgress({
+        progress: 100,
+        total: 100,
+      });
+
       return {
         content: [
           {
@@ -182,8 +185,16 @@ server.addTool({
         ],
       };
     } catch (error) {
-      context.log.error(`Error: ${error.message}`);
-      throw new Error(`Failed to search Reddit: ${error.message}`);
+      context.log.error("Failed to search Reddit", {
+        error: error.message,
+        stack: error.stack,
+      });
+
+      if (error instanceof UserError) {
+        throw error;
+      }
+
+      throw new UserError(`Failed to search Reddit: ${error.message}`);
     }
   },
 });
