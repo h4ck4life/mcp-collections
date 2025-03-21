@@ -9,7 +9,7 @@ const server = new FastMCP({
 
 server.addTool({
   name: "searchReddit",
-  description: "Search for posts or comments on Reddit by keyword",
+  description: "Search for posts or comments on Reddit by keyword or IDs",
   parameters: z.object({
     type: z
       .enum(["comment", "submission"])
@@ -18,7 +18,9 @@ server.addTool({
     ids: z
       .string()
       .optional()
-      .describe("Get specific items by comma-separated base36 IDs"),
+      .describe(
+        "Get specific items by comma-separated base36 IDs (e.g., 'i46w2wg,k3dn7q'). When used, other parameters are ignored."
+      ),
     size: z
       .number()
       .optional()
@@ -84,25 +86,129 @@ server.addTool({
       const endpoint = args.type + "/";
       const url = new URL(baseUrl + endpoint);
 
-      // Add all provided parameters to the URL
-      Object.entries(args).forEach(([key, value]) => {
-        if (value !== undefined && key !== "type") {
-          url.searchParams.set(key, value.toString());
+      // Handle ids parameter exclusively if provided
+      if (args.ids) {
+        url.searchParams.set("ids", args.ids.toString());
+        context.log.info("Making request to Reddit API with IDs only", {
+          url: url.toString(),
+        });
+      } else {
+        // Add all provided parameters to the URL
+        Object.entries(args).forEach(([key, value]) => {
+          if (value !== undefined && key !== "type") {
+            url.searchParams.set(key, value.toString());
+          }
+        });
+        context.log.info(
+          "Making request to Reddit API with search parameters",
+          { url: url.toString() }
+        );
+      }
+
+      // Add retry logic
+      const maxRetries = 3;
+      let retries = 0;
+      let response;
+
+      while (retries < maxRetries) {
+        try {
+          response = await axios.get(url.toString(), {
+            timeout: 60000, // 60 second timeout
+            validateStatus: null, // Don't throw on any status code
+          });
+
+          // Log response even if it's an error
+          context.log.info("API Response received", {
+            status: response.status,
+            statusText: response.statusText,
+            headers: response.headers,
+            data:
+              typeof response.data === "object"
+                ? JSON.stringify(response.data).substring(0, 500)
+                : String(response.data).substring(0, 500),
+          });
+
+          if (response.status >= 400) {
+            throw new Error(
+              `HTTP error ${response.status}: ${response.statusText}`
+            );
+          }
+
+          break; // Successful response, exit retry loop
+        } catch (error) {
+          retries++;
+
+          // Log detailed error information
+          if (error.response) {
+            // The request was made and the server responded with a status code
+            // that falls out of the range of 2xx
+            context.log.error("API Error details", {
+              status: error.response.status,
+              statusText: error.response.statusText,
+              headers: error.response.headers,
+              data:
+                typeof error.response.data === "object"
+                  ? JSON.stringify(error.response.data).substring(0, 500)
+                  : String(error.response.data).substring(0, 500),
+            });
+          } else if (error.request) {
+            // The request was made but no response was received
+            context.log.error("No response received", {
+              request: error.request,
+            });
+          } else {
+            // Something happened in setting up the request
+            context.log.error("Request setup error", {
+              message: error.message,
+            });
+          }
+
+          context.log.warn(
+            `Request failed (attempt ${retries}/${maxRetries})`,
+            { error: error.message }
+          );
+
+          if (retries >= maxRetries) {
+            throw error; // Rethrow if max retries reached
+          }
+
+          // Wait before retry (exponential backoff)
+          const delay = 1000 * Math.pow(2, retries - 1); // 1s, 2s, 4s...
+          await new Promise((resolve) => setTimeout(resolve, delay));
         }
-      });
+      }
 
-      context.log.info("Making request to Reddit API", { url: url.toString() });
+      if (!response || !response.data) {
+        throw new UserError("No response received from Reddit API");
+      }
 
-      const response = await axios.get(url.toString(), {
-        timeout: 60000, // 60 second timeout
-      });
-
-      if (
-        !response.data ||
-        !response.data.data ||
-        !Array.isArray(response.data.data)
-      ) {
-        throw new UserError("No results found or invalid response format");
+      if (!response.data.data || !Array.isArray(response.data.data)) {
+        // Handle empty results more gracefully
+        context.log.info("No results found in response", {
+          data:
+            typeof response.data === "object"
+              ? JSON.stringify(response.data).substring(0, 500)
+              : String(response.data).substring(0, 500),
+        });
+        return {
+          content: [
+            {
+              type: "text",
+              text: JSON.stringify(
+                {
+                  results: [],
+                  count: 0,
+                  metadata: {
+                    total_results: 0,
+                    message: "No results found for the given query",
+                  },
+                },
+                null,
+                2
+              ),
+            },
+          ],
+        };
       }
 
       context.log.info("Retrieved results", {
@@ -185,13 +291,37 @@ server.addTool({
         ],
       };
     } catch (error) {
+      // Comprehensive error logging
       context.log.error("Failed to search Reddit", {
         error: error.message,
         stack: error.stack,
+        request_params: args,
       });
 
       if (error instanceof UserError) {
         throw error;
+      }
+
+      // More specific error messages for different status codes
+      if (error.response) {
+        const status = error.response.status;
+        if (status === 500) {
+          throw new UserError(
+            "Reddit API server error (500). This could be due to invalid parameters or temporary server issues. Please try again later."
+          );
+        } else if (status === 429) {
+          throw new UserError(
+            "Rate limit exceeded (429). Too many requests to the Reddit API."
+          );
+        } else if (status === 404) {
+          throw new UserError(
+            "Reddit API endpoint not found (404). Please check your parameters."
+          );
+        } else {
+          throw new UserError(
+            `Failed to search Reddit: HTTP error ${status}: ${error.response.statusText}`
+          );
+        }
       }
 
       throw new UserError(`Failed to search Reddit: ${error.message}`);
