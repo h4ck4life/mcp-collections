@@ -1,4 +1,4 @@
-import { FastMCP, imageContent, UserError } from "fastmcp";
+import { FastMCP, UserError } from "fastmcp";
 import { z } from "zod";
 import axios from "axios";
 
@@ -9,101 +9,65 @@ const server = new FastMCP({
 
 server.addTool({
   name: "searchReddit",
-  description: "Search for posts or comments on Reddit by keyword or IDs",
+  description: "Search for posts on Reddit by keyword",
   parameters: z.object({
-    type: z
-      .enum(["comment", "submission"])
-      .describe("Search type: comments or submissions"),
-    q: z.string().optional().describe("Search term (searches all fields)"),
-    ids: z
-      .string()
-      .optional()
-      .describe(
-        "Get specific items by comma-separated base36 IDs (e.g., 'i46w2wg,k3dn7q'). When used, other parameters are ignored."
-      ),
-    size: z
+    q: z.string().describe("Search term"),
+    limit: z
       .number()
       .optional()
-      .default(100)
-      .describe("Number of results to return (max 100)"),
+      .default(25)
+      .describe("Maximum number of items to return (max 100)"),
     sort: z
-      .enum(["asc", "desc"])
+      .enum(["relevance", "hot", "top", "new", "comments"])
       .optional()
-      .default("desc")
+      .default("relevance")
       .describe("Sort order"),
-    sort_type: z
-      .enum(["score", "num_comments", "created_utc"])
+    t: z
+      .enum(["hour", "day", "week", "month", "year", "all"])
       .optional()
-      .default("created_utc")
-      .describe("Field to sort by"),
-    author: z.string().optional().describe("Restrict to a specific author"),
-    subreddit: z
+      .default("all")
+      .describe("Time period"),
+    type: z
       .string()
       .optional()
-      .describe("Restrict to a specific subreddit"),
-    after: z
+      .describe("Comma-delimited list of result types (sr, link, user)"),
+    category: z
       .string()
       .optional()
-      .describe("Return results after this date (epoch or Xd/Xh/Xm/Xs)"),
-    before: z
-      .string()
-      .optional()
-      .describe("Return results before this date (epoch or Xd/Xh/Xm/Xs)"),
-    link_id: z
-      .string()
-      .optional()
-      .describe(
-        "Return comments from a specific submission (for comment search only)"
-      ),
-
-    // Submission-specific parameters
-    title: z.string().optional().describe("Search in submission titles only"),
-    selftext: z
-      .string()
-      .optional()
-      .describe("Search in submission selftext only"),
-    score: z
-      .string()
-      .optional()
-      .describe("Filter by score (e.g., '>100', '<25')"),
-    num_comments: z
-      .string()
-      .optional()
-      .describe("Filter by number of comments (e.g., '>100')"),
-    over_18: z.boolean().optional().describe("Filter NSFW content"),
-    is_video: z.boolean().optional().describe("Filter video content"),
-    locked: z.boolean().optional().describe("Filter locked threads"),
-    stickied: z.boolean().optional().describe("Filter stickied content"),
-    spoiler: z.boolean().optional().describe("Filter spoiler content"),
-    contest_mode: z
+      .describe("Category string (max 5 characters)"),
+    include_facets: z
       .boolean()
       .optional()
-      .describe("Filter contest mode submissions"),
+      .describe("Include facets in response"),
+    restrict_sr: z
+      .boolean()
+      .optional()
+      .describe("Restrict to specific subreddit"),
+    after: z.string().optional().describe("Fullname of item to fetch after"),
+    before: z.string().optional().describe("Fullname of item to fetch before"),
+    count: z
+      .number()
+      .optional()
+      .default(0)
+      .describe("Count of items already seen"),
+    show: z.string().optional().describe("(optional) the string 'all'"),
+    sr_detail: z.string().optional().describe("(optional) expand subreddits"),
   }),
   execute: async (args, context) => {
     try {
-      const baseUrl = "https://api.pullpush.io/reddit/search/";
-      const endpoint = args.type + "/";
-      const url = new URL(baseUrl + endpoint);
+      const baseUrl = "https://www.reddit.com/search.json";
+      const url = new URL(baseUrl);
 
-      // Handle ids parameter exclusively if provided
-      if (args.ids) {
-        url.searchParams.set("ids", args.ids.toString());
-        context.log.info("Making request to Reddit API with IDs only", {
-          url: url.toString(),
-        });
-      } else {
-        // Add all provided parameters to the URL
-        Object.entries(args).forEach(([key, value]) => {
-          if (value !== undefined && key !== "type") {
-            url.searchParams.set(key, value.toString());
-          }
-        });
-        context.log.info(
-          "Making request to Reddit API with search parameters",
-          { url: url.toString() }
-        );
-      }
+      // Add all provided parameters to the URL
+      Object.entries(args).forEach(([key, value]) => {
+        if (value !== undefined) {
+          url.searchParams.set(key, value.toString());
+        }
+      });
+
+      context.log.info("Making request to Reddit API", {
+        url: url.toString(),
+      });
 
       // Add retry logic
       const maxRetries = 3;
@@ -115,17 +79,14 @@ server.addTool({
           response = await axios.get(url.toString(), {
             timeout: 60000, // 60 second timeout
             validateStatus: null, // Don't throw on any status code
+            headers: {
+              "User-Agent": "FastMCP-Reddit-Search/1.0.0",
+            },
           });
 
-          // Log response even if it's an error
           context.log.info("API Response received", {
             status: response.status,
             statusText: response.statusText,
-            headers: response.headers,
-            data:
-              typeof response.data === "object"
-                ? JSON.stringify(response.data).substring(0, 500)
-                : String(response.data).substring(0, 500),
           });
 
           if (response.status >= 400) {
@@ -138,26 +99,17 @@ server.addTool({
         } catch (error) {
           retries++;
 
-          // Log detailed error information
+          // Log error information
           if (error.response) {
-            // The request was made and the server responded with a status code
-            // that falls out of the range of 2xx
             context.log.error("API Error details", {
               status: error.response.status,
               statusText: error.response.statusText,
-              headers: error.response.headers,
-              data:
-                typeof error.response.data === "object"
-                  ? JSON.stringify(error.response.data).substring(0, 500)
-                  : String(error.response.data).substring(0, 500),
             });
           } else if (error.request) {
-            // The request was made but no response was received
             context.log.error("No response received", {
               request: error.request,
             });
           } else {
-            // Something happened in setting up the request
             context.log.error("Request setup error", {
               message: error.message,
             });
@@ -165,7 +117,9 @@ server.addTool({
 
           context.log.warn(
             `Request failed (attempt ${retries}/${maxRetries})`,
-            { error: error.message }
+            {
+              error: error.message,
+            }
           );
 
           if (retries >= maxRetries) {
@@ -182,14 +136,8 @@ server.addTool({
         throw new UserError("No response received from Reddit API");
       }
 
-      if (!response.data.data || !Array.isArray(response.data.data)) {
-        // Handle empty results more gracefully
-        context.log.info("No results found in response", {
-          data:
-            typeof response.data === "object"
-              ? JSON.stringify(response.data).substring(0, 500)
-              : String(response.data).substring(0, 500),
-        });
+      if (!response.data.data || !response.data.data.children) {
+        context.log.info("No results found in response");
         return {
           content: [
             {
@@ -212,56 +160,35 @@ server.addTool({
       }
 
       context.log.info("Retrieved results", {
-        count: response.data.data.length,
-        type: args.type,
+        count: response.data.data.children.length,
       });
 
-      const results = response.data.data.map((item) => {
-        if (args.type === "submission") {
-          return {
-            id: item.id,
-            title: item.title,
-            author: item.author,
-            subreddit: item.subreddit,
-            subreddit_id: item.subreddit_id,
-            score: item.score || item.ups,
-            created_utc: item.created_utc,
-            num_comments: item.num_comments,
-            permalink: item.permalink
-              ? `https://www.reddit.com${item.permalink}`
-              : null,
-            url: item.url,
-            selftext: item.selftext
-              ? item.selftext.length > 300
-                ? item.selftext.substring(0, 300) + "..."
-                : item.selftext
-              : "",
-            over_18: item.over_18,
-            is_video: item.is_video,
-            locked: item.locked,
-            stickied: item.stickied,
-            spoiler: item.spoiler,
-          };
-        } else {
-          return {
-            id: item.id,
-            author: item.author,
-            subreddit: item.subreddit,
-            subreddit_id: item.subreddit_id,
-            score: item.score || item.ups,
-            created_utc: item.created_utc,
-            permalink: item.permalink
-              ? `https://www.reddit.com${item.permalink}`
-              : null,
-            body: item.body
-              ? item.body.length > 300
-                ? item.body.substring(0, 300) + "..."
-                : item.body
-              : "",
-            link_id: item.link_id,
-            parent_id: item.parent_id,
-          };
-        }
+      const results = response.data.data.children.map((item) => {
+        const data = item.data;
+        return {
+          id: data.id,
+          title: data.title,
+          author: data.author,
+          subreddit: data.subreddit,
+          subreddit_id: data.subreddit_id,
+          score: data.score || data.ups,
+          created_utc: data.created_utc,
+          num_comments: data.num_comments,
+          permalink: data.permalink
+            ? `https://www.reddit.com${data.permalink}`
+            : null,
+          url: data.url,
+          selftext: data.selftext
+            ? data.selftext.length > 300
+              ? data.selftext.substring(0, 300) + "..."
+              : data.selftext
+            : "",
+          over_18: data.over_18,
+          is_video: data.is_video,
+          locked: data.locked,
+          stickied: data.stickied,
+          spoiler: data.spoiler,
+        };
       });
 
       context.reportProgress({
@@ -277,11 +204,13 @@ server.addTool({
               {
                 results,
                 count: results.length,
-                metadata: response.data.metadata || {
+                metadata: {
+                  after: response.data.data.after,
+                  before: response.data.data.before,
                   total_results: results.length,
-                  size: args.size || 100,
-                  sort: args.sort || "desc",
-                  sort_type: args.sort_type || "created_utc",
+                  limit: args.limit || 25,
+                  sort: args.sort || "relevance",
+                  timeframe: args.t || "all",
                 },
               },
               null,
@@ -291,7 +220,7 @@ server.addTool({
         ],
       };
     } catch (error) {
-      // Comprehensive error logging
+      // Error logging
       context.log.error("Failed to search Reddit", {
         error: error.message,
         stack: error.stack,
@@ -302,12 +231,12 @@ server.addTool({
         throw error;
       }
 
-      // More specific error messages for different status codes
+      // Specific error messages for different status codes
       if (error.response) {
         const status = error.response.status;
         if (status === 500) {
           throw new UserError(
-            "Reddit API server error (500). This could be due to invalid parameters or temporary server issues. Please try again later."
+            "Reddit API server error (500). Please try again later."
           );
         } else if (status === 429) {
           throw new UserError(
@@ -325,6 +254,206 @@ server.addTool({
       }
 
       throw new UserError(`Failed to search Reddit: ${error.message}`);
+    }
+  },
+});
+
+server.addTool({
+  name: "getRedditComments",
+  description: "Get comments for a specific Reddit post",
+  parameters: z.object({
+    postId: z.string().describe("The ID of the post to get comments for"),
+    sort: z
+      .enum([
+        "confidence",
+        "top",
+        "new",
+        "controversial",
+        "old",
+        "random",
+        "qa",
+        "live",
+      ])
+      .optional()
+      .default("confidence")
+      .describe("Sort order for comments"),
+    limit: z
+      .number()
+      .optional()
+      .default(100)
+      .describe("Maximum number of comments to return"),
+  }),
+  execute: async (args, context) => {
+    try {
+      const baseUrl = `https://www.reddit.com/comments/${args.postId}.json`;
+      const url = new URL(baseUrl);
+
+      // Add parameters
+      url.searchParams.set("sort", args.sort);
+      url.searchParams.set("limit", args.limit.toString());
+
+      context.log.info("Making request to Reddit API for comments", {
+        url: url.toString(),
+        postId: args.postId,
+      });
+
+      // Add retry logic
+      const maxRetries = 3;
+      let retries = 0;
+      let response;
+
+      while (retries < maxRetries) {
+        try {
+          response = await axios.get(url.toString(), {
+            timeout: 60000,
+            validateStatus: null,
+            headers: {
+              "User-Agent": "FastMCP-Reddit-Comments/1.0.0",
+            },
+          });
+
+          context.log.info("API Response received", {
+            status: response.status,
+            statusText: response.statusText,
+          });
+
+          if (response.status >= 400) {
+            throw new Error(
+              `HTTP error ${response.status}: ${response.statusText}`
+            );
+          }
+
+          break;
+        } catch (error) {
+          retries++;
+
+          // Log error information
+          if (error.response) {
+            context.log.error("API Error details", {
+              status: error.response.status,
+              statusText: error.response.statusText,
+            });
+          } else {
+            context.log.error("Request error", {
+              message: error.message,
+            });
+          }
+
+          if (retries >= maxRetries) {
+            throw error;
+          }
+
+          const delay = 1000 * Math.pow(2, retries - 1);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+
+      if (
+        !response ||
+        !response.data ||
+        !Array.isArray(response.data) ||
+        response.data.length < 2
+      ) {
+        throw new UserError("Invalid response from Reddit API");
+      }
+
+      // First item in array is the post, second is the comments
+      const post = response.data[0].data.children[0].data;
+      const comments = response.data[1].data.children;
+
+      // Process comments recursively
+      function processComments(comments) {
+        return comments.map((comment) => {
+          if (comment.kind === "more") {
+            return {
+              type: "more",
+              count: comment.data.count,
+              children: comment.data.children,
+            };
+          }
+
+          const data = comment.data;
+          const result = {
+            id: data.id,
+            author: data.author,
+            body: data.body,
+            score: data.score,
+            created_utc: data.created_utc,
+            permalink: data.permalink
+              ? `https://www.reddit.com${data.permalink}`
+              : null,
+            replies:
+              data.replies && data.replies.data
+                ? processComments(data.replies.data.children)
+                : [],
+          };
+
+          return result;
+        });
+      }
+
+      const processedComments = processComments(comments);
+
+      context.reportProgress({
+        progress: 100,
+        total: 100,
+      });
+
+      return {
+        content: [
+          {
+            type: "text",
+            text: JSON.stringify(
+              {
+                post: {
+                  id: post.id,
+                  title: post.title,
+                  author: post.author,
+                  subreddit: post.subreddit,
+                  score: post.score,
+                  created_utc: post.created_utc,
+                  permalink: post.permalink
+                    ? `https://www.reddit.com${post.permalink}`
+                    : null,
+                  url: post.url,
+                  selftext: post.selftext || "",
+                  num_comments: post.num_comments,
+                },
+                comments: processedComments,
+                metadata: {
+                  postId: args.postId,
+                  sort: args.sort,
+                  limit: args.limit,
+                  comment_count: processedComments.length,
+                },
+              },
+              null,
+              2
+            ),
+          },
+        ],
+      };
+    } catch (error) {
+      context.log.error("Failed to get Reddit comments", {
+        error: error.message,
+        stack: error.stack,
+        postId: args.postId,
+      });
+
+      if (error instanceof UserError) {
+        throw error;
+      }
+
+      if (error.response) {
+        const status = error.response.status;
+        if (status === 404) {
+          throw new UserError(`Post with ID ${args.postId} not found`);
+        } else {
+          throw new UserError(`Failed to get comments: HTTP error ${status}`);
+        }
+      }
+
+      throw new UserError(`Failed to get comments: ${error.message}`);
     }
   },
 });
