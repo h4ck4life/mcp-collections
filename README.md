@@ -1,4 +1,7 @@
 # MCP Collections
+- Youtube
+- Mermaid diagram
+- Reddit
 
 ## Installation
 
@@ -25,6 +28,10 @@ Below is an example configuration for Claude:
     "mermaidjsdiagram": {
       "command": "npx",
       "args": ["tsx", "/Volumes/TRANSCEND/dev/mcp-collections/mermaid.ts"]
+    },
+    "reddit": {
+      "command": "npx",
+      "args": ["tsx", "/Volumes/TRANSCEND/dev/mcp-collections/reddit.ts"]
     }
   }
 }
