@@ -1,8 +1,10 @@
 import { FastMCP } from "fastmcp";
 import { z } from "zod";
 import axios from "axios";
+import { Supadata } from "@supadata/js";
 
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
+const SUPADATA_API_KEY = process.env.SUPADATA_API_KEY;
 
 const server = new FastMCP({
   name: "Youtube MCP",
@@ -25,6 +27,53 @@ const addChannelUrl = (item) => {
   }
   return item;
 };
+
+server.addTool({
+  name: "youtubeTranscript",
+  description: "Get transcript for a YouTube video",
+  parameters: z.object({
+    videoId: z.string().describe("YouTube video ID"),
+    lang: z
+      .string()
+      .optional()
+      .describe("Optional language code for the transcript"),
+    text: z
+      .boolean()
+      .optional()
+      .default(false)
+      .describe("Return plain text instead of timestamped list"),
+  }),
+  execute: async (args) => {
+    try {
+      if (!SUPADATA_API_KEY) {
+        return JSON.stringify({
+          error: "Supadata API key not found in environment variables",
+        });
+      }
+
+      // Initialize Supadata client with API key from environment variable
+      const supadata = new Supadata({
+        apiKey: SUPADATA_API_KEY,
+      });
+
+      const transcript = await supadata.youtube.transcript({
+        videoId: args.videoId,
+        lang: args.lang,
+        text: args.text,
+      });
+
+      return JSON.stringify({
+        success: true,
+        transcript: transcript,
+      });
+    } catch (error) {
+      return JSON.stringify({
+        error: "Transcript retrieval error",
+        message: error.message,
+      });
+    }
+  },
+});
 
 server.addTool({
   name: "youtubeVideoInfo",

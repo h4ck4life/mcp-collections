@@ -9,6 +9,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@supadata/js": "^1.0.5",
     "axios": "^1.8.4",
     "fastmcp": "^1.20.5",
     "zod": "^3.24.2"
