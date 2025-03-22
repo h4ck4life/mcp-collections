@@ -2,7 +2,7 @@
 - Youtube
 - Mermaid diagram
 - Reddit
-- Fetch web (headless browser)
+- Fetch web (headless browser - Please install `npx playwright install --with-deps`)
 
 ## Installation
 
