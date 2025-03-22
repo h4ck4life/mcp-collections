@@ -2,6 +2,7 @@
 - Youtube
 - Mermaid diagram
 - Reddit
+- Fetch web (headless browser)
 
 ## Installation
 
@@ -32,6 +33,10 @@ Below is an example configuration for Claude:
     "reddit": {
       "command": "npx",
       "args": ["tsx", "/Volumes/TRANSCEND/dev/mcp-collections/reddit.ts"]
+    },
+    "fetch": {
+      "command": "npx",
+      "args": ["tsx", "/Volumes/TRANSCEND/dev/mcp-collections/fetch.ts"]
     }
   }
 }
