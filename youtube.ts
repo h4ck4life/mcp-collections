@@ -1,10 +1,9 @@
 import { FastMCP } from "fastmcp";
 import { z } from "zod";
 import axios from "axios";
-import { Supadata } from "@supadata/js";
+import { YoutubeTranscript } from "youtube-transcript";
 
 const YOUTUBE_API_KEY = process.env.YOUTUBE_API_KEY;
-const SUPADATA_API_KEY = process.env.SUPADATA_API_KEY;
 
 const server = new FastMCP({
   name: "Youtube MCP",
@@ -32,11 +31,7 @@ server.addTool({
   name: "youtubeTranscript",
   description: "Get transcript for a YouTube video",
   parameters: z.object({
-    videoId: z.string().describe("YouTube video ID"),
-    lang: z
-      .string()
-      .optional()
-      .describe("Optional language code for the transcript"),
+    videoUrl: z.string().describe("YouTube video URL"),
     text: z
       .boolean()
       .optional()
@@ -45,27 +40,83 @@ server.addTool({
   }),
   execute: async (args) => {
     try {
-      if (!SUPADATA_API_KEY) {
+      // Custom HTML entity decoder function
+      function decodeHtmlEntities(text) {
+        const entities = {
+          "&amp;": "&",
+          "&lt;": "<",
+          "&gt;": ">",
+          "&quot;": '"',
+          "&#39;": "'",
+          "&amp;#39;": "'", // This handles the double-encoded version
+        };
+
+        // Replace all HTML entities with their decoded values
+        return text.replace(
+          /&amp;#39;|&#39;|&quot;|&lt;|&gt;|&amp;/g,
+          (match) => entities[match] || match
+        );
+      }
+
+      // Function to extract video ID from various YouTube URL formats
+      function extractYoutubeVideoId(url) {
+        // Handle different YouTube URL formats
+        const regexPatterns = [
+          /youtu\.be\/([^?&]+)/, // youtu.be/XXXX
+          /youtube\.com\/watch\?v=([^&]+)/, // youtube.com/watch?v=XXXX
+          /youtube\.com\/embed\/([^?&]+)/, // youtube.com/embed/XXXX
+          /youtube\.com\/v\/([^?&]+)/, // youtube.com/v/XXXX
+          /youtube\.com\/live\/([^?&]+)/, // youtube.com/live/XXXX
+          /youtu\.be\/([^?&]+)/, // youtu.be/XXXX?si=abc
+          /youtube\.com\/shorts\/([^?&]+)/, // youtube.com/shorts/XXXX
+        ];
+
+        for (const pattern of regexPatterns) {
+          const match = url.match(pattern);
+          if (match && match[1]) {
+            return match[1];
+          }
+        }
+
+        return null; // Return null if no pattern matches
+      }
+
+      // Extract video ID from URL
+      const videoId = extractYoutubeVideoId(args.videoUrl);
+
+      if (!videoId) {
         return JSON.stringify({
-          error: "Supadata API key not found in environment variables",
+          error: "Invalid YouTube URL",
+          message: "Could not extract video ID from the provided URL",
         });
       }
 
-      // Initialize Supadata client with API key from environment variable
-      const supadata = new Supadata({
-        apiKey: SUPADATA_API_KEY,
-      });
+      // Fetch transcript
+      const transcript = await YoutubeTranscript.fetchTranscript(videoId);
 
-      const transcript = await supadata.youtube.transcript({
-        videoId: args.videoId,
-        lang: args.lang,
-        text: args.text,
-      });
+      // Process transcript based on text parameter
+      if (args.text) {
+        // Return plain text version
+        let fullText = transcript.map((segment) => segment.text).join(" ");
+        // Decode HTML entities
+        fullText = decodeHtmlEntities(fullText);
 
-      return JSON.stringify({
-        success: true,
-        transcript: transcript,
-      });
+        return JSON.stringify({
+          success: true,
+          transcript: fullText,
+        });
+      } else {
+        // Return timestamped list but still decode HTML entities in each segment
+        const decodedTranscript = transcript.map((segment) => ({
+          ...segment,
+          text: decodeHtmlEntities(segment.text),
+        }));
+
+        return JSON.stringify({
+          success: true,
+          transcript: decodedTranscript,
+        });
+      }
     } catch (error) {
       return JSON.stringify({
         error: "Transcript retrieval error",
