@@ -9,6 +9,7 @@
   "license": "ISC",
   "description": "",
   "dependencies": {
+    "@mermaid-js/mermaid-cli": "^11.4.2",
     "axios": "^1.8.4",
     "fastmcp": "^1.20.5",
     "playwright": "^1.51.1",
