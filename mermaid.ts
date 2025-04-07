@@ -57,8 +57,12 @@ server.addTool({
       // Determine background color - use a dark gray by default for dark mode
       const backgroundColor = args.backgroundColor || "#121212"; // Very dark gray background
 
-      // Write the diagram to input file without modifying the content
-      await fs.writeFile(inputFile, args.diagram.trim());
+      // Clean the diagram input - remove any instances of "::dark" syntax
+      let cleanedDiagram = args.diagram.trim();
+      cleanedDiagram = cleanedDiagram.replace(/::dark/g, "");
+
+      // Write the cleaned diagram to input file
+      await fs.writeFile(inputFile, cleanedDiagram);
 
       // Create a custom CSS file to override styles while preserving diagram structure
       const customCSS = `
@@ -106,6 +110,51 @@ server.addTool({
         .node.green rect, .node.green circle, .node.green ellipse {
           fill: #2E7D32 !important;
           stroke: #81C784 !important;
+        }
+        
+        /* Different colors for different levels of mindmap connections */
+        .mindmap-level1 .edge {
+          stroke: #FF5252 !important; /* Red */
+        }
+        .mindmap-level2 .edge {
+          stroke: #4CAF50 !important; /* Green */
+        }
+        .mindmap-level3 .edge {
+          stroke: #2196F3 !important; /* Blue */
+        }
+        .mindmap-level4 .edge {
+          stroke: #FFC107 !important; /* Amber */
+        }
+        .mindmap-level5 .edge {
+          stroke: #9C27B0 !important; /* Purple */
+        }
+        
+        /* Different colors for flowchart links based on their types */
+        .flowchart-link.stroke1 {
+          stroke: #FF5252 !important; /* Red */
+        }
+        .flowchart-link.stroke2 {
+          stroke: #4CAF50 !important; /* Green */
+        }
+        .flowchart-link.stroke3 {
+          stroke: #2196F3 !important; /* Blue */
+        }
+        
+        /* For class diagrams */
+        .relation.stroke1 {
+          stroke: #FF5252 !important; /* Red */
+        }
+        .relation.stroke2 {
+          stroke: #4CAF50 !important; /* Green */
+        }
+        .relation.stroke3 {
+          stroke: #2196F3 !important; /* Blue */
+        }
+        
+        /* Make arrowheads match their line colors */
+        .arrowheadPath {
+          fill: inherit !important;
+          stroke: inherit !important;
         }
       `;
 
