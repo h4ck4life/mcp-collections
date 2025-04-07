@@ -19,14 +19,20 @@ server.addTool({
   parameters: z.object({
     diagram: z.string().describe("Mermaid diagram syntax"),
     theme: z
-      .enum(["default", "forest", "dark", "neutral"])
+      .enum(["default", "forest", "dark", "neutral", "base"])
       .optional()
       .default("default")
-      .describe("Diagram theme"),
+      .describe("Diagram theme (default, forest, dark, neutral, or base)"),
+    themeVariables: z
+      .record(z.union([z.string(), z.boolean(), z.number()]))
+      .optional()
+      .describe(
+        "Theme variables for customization (e.g., primaryColor, lineColor)"
+      ),
     backgroundColor: z
       .string()
       .optional()
-      .describe("Background color (e.g., FF0000 or !white)"),
+      .describe("Background color (e.g., #FF0000 or transparent)"),
     width: z.number().optional().describe("Image width in pixels"),
     height: z.number().optional().describe("Image height in pixels"),
     scale: z
@@ -35,30 +41,84 @@ server.addTool({
       .max(5)
       .optional()
       .describe("Image scale factor (1-5)"),
+    darkMode: z
+      .boolean()
+      .optional()
+      .describe("Enable dark mode for the diagram"),
   }),
   execute: async (args, context) => {
     try {
       // Create temporary directory for input/output files
       const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "mermaid-"));
       const inputFile = path.join(tempDir, "input.mmd");
+      const cssFile = path.join(tempDir, "custom.css");
       const outputFile = path.join(tempDir, "output.png");
 
-      // Write diagram to input file
+      // Determine background color - use a dark gray by default for dark mode
+      const backgroundColor = args.backgroundColor || "#121212"; // Very dark gray background
+
+      // Write the diagram to input file without modifying the content
       await fs.writeFile(inputFile, args.diagram.trim());
 
-      // Set significantly larger dimensions and higher scale factor
-      const width = args.width || 2400; // Much wider
-      const height = args.height || 1600; // Much taller
-      const scale = args.scale || 3; // Higher scale factor for better resolution
+      // Create a custom CSS file to override styles while preserving diagram structure
+      const customCSS = `
+        /* Base styles for dark theme with good contrast */
+        .label {
+          color: white !important;
+          font-weight: 500 !important;
+        }
+        .node rect, .node circle, .node ellipse, .node polygon, .node path {
+          stroke-width: 2px !important;
+        }
+        .node.default rect, .node.default circle, .node.default ellipse {
+          fill: #333333 !important;
+          stroke: #BBBBBB !important;
+        }
+        .edge {
+          stroke: #CCCCCC !important;
+          stroke-width: 1.5px !important;
+        }
+        .edgeLabel {
+          color: white !important;
+          background-color: rgba(18, 18, 18, 0.7) !important;
+        }
+        .cluster rect, .cluster polygon {
+          fill: #2D2D2D !important;
+          stroke: #666666 !important;
+        }
+        /* Ensure text is always readable regardless of node color */
+        .node text {
+          fill: white !important;
+          stroke: none !important;
+          font-size: 14px !important;
+        }
+        /* Add a slight gradient/shadow to improve readability */
+        .node rect, .node circle, .node ellipse, .node polygon {
+          filter: drop-shadow(0px 2px 3px rgba(0, 0, 0, 0.4)) !important;
+        }
+        /* Make main node stand out */
+        #flowchart-main text, #mindmap-root text {
+          font-weight: bold !important;
+          font-size: 16px !important;
+          fill: white !important;
+        }
+        /* Better colors for green nodes while preserving structure */
+        .node.green rect, .node.green circle, .node.green ellipse {
+          fill: #2E7D32 !important;
+          stroke: #81C784 !important;
+        }
+      `;
 
-      // Build the mmdc command with larger size and higher quality
-      let command = `npx mmdc -i "${inputFile}" -o "${outputFile}" -t ${
-        args.theme || "default"
-      } -w ${width} -H ${height} -s ${scale}`;
+      // Write CSS to file
+      await fs.writeFile(cssFile, customCSS);
 
-      if (args.backgroundColor) {
-        command += ` -b "${args.backgroundColor}"`;
-      }
+      // Set dimensions and scale factor
+      const width = args.width || 2400;
+      const height = args.height || 1600;
+      const scale = args.scale || 3;
+
+      // Build the mmdc command with proper arguments
+      let command = `npx mmdc -i "${inputFile}" -o "${outputFile}" -t dark -b "${backgroundColor}" -w ${width} -H ${height} -s ${scale} --cssFile "${cssFile}"`;
 
       // Log the command being executed
       context.log.info(`Executing command: ${command}`);
@@ -66,7 +126,7 @@ server.addTool({
       // Execute the mmdc command
       const { stdout, stderr } = await execPromise(command);
 
-      if (stderr) {
+      if (stderr && !stderr.includes("Puppeteer is downloading")) {
         context.log.warn(`Command stderr: ${stderr}`);
       }
 
