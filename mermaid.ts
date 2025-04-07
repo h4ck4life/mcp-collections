@@ -1,6 +1,12 @@
 import { FastMCP } from "fastmcp";
 import { z } from "zod";
-import axios from "axios";
+import fs from "fs/promises";
+import path from "path";
+import os from "os";
+import { exec } from "child_process";
+import { promisify } from "util";
+
+const execPromise = promisify(exec);
 
 const server = new FastMCP({
   name: "Mermaid MCP",
@@ -26,30 +32,52 @@ server.addTool({
     scale: z
       .number()
       .min(1)
-      .max(3)
+      .max(5)
       .optional()
-      .describe("Image scale factor (1-3)"),
+      .describe("Image scale factor (1-5)"),
   }),
   execute: async (args, context) => {
     try {
-      const base64Diagram = Buffer.from(args.diagram.trim()).toString("base64");
+      // Create temporary directory for input/output files
+      const tempDir = await fs.mkdtemp(path.join(os.tmpdir(), "mermaid-"));
+      const inputFile = path.join(tempDir, "input.mmd");
+      const outputFile = path.join(tempDir, "output.png");
 
-      const url = new URL(`https://mermaid.ink/img/${base64Diagram}`);
-      url.searchParams.set("type", "png");
+      // Write diagram to input file
+      await fs.writeFile(inputFile, args.diagram.trim());
 
-      if (args.theme) url.searchParams.set("theme", args.theme);
-      if (args.backgroundColor)
-        url.searchParams.set("bgColor", args.backgroundColor);
-      if (args.width) url.searchParams.set("width", args.width.toString());
-      if (args.height) url.searchParams.set("height", args.height.toString());
-      if (args.scale && (args.width || args.height))
-        url.searchParams.set("scale", args.scale.toString());
+      // Set significantly larger dimensions and higher scale factor
+      const width = args.width || 2400; // Much wider
+      const height = args.height || 1600; // Much taller
+      const scale = args.scale || 3; // Higher scale factor for better resolution
 
-      const response = await axios.get(url.toString(), {
-        responseType: "arraybuffer",
+      // Build the mmdc command with larger size and higher quality
+      let command = `npx mmdc -i "${inputFile}" -o "${outputFile}" -t ${
+        args.theme || "default"
+      } -w ${width} -H ${height} -s ${scale}`;
+
+      if (args.backgroundColor) {
+        command += ` -b "${args.backgroundColor}"`;
+      }
+
+      // Log the command being executed
+      context.log.info(`Executing command: ${command}`);
+
+      // Execute the mmdc command
+      const { stdout, stderr } = await execPromise(command);
+
+      if (stderr) {
+        context.log.warn(`Command stderr: ${stderr}`);
+      }
+
+      // Read the generated PNG file
+      const pngBuffer = await fs.readFile(outputFile);
+      const imageData = pngBuffer.toString("base64");
+
+      // Clean up temporary files
+      await fs.rm(tempDir, { recursive: true, force: true }).catch(() => {
+        // Ignore cleanup errors
       });
-
-      const imageData = Buffer.from(response.data).toString("base64");
 
       return {
         content: [
@@ -62,6 +90,9 @@ server.addTool({
       };
     } catch (error) {
       context.log.error(`Error: ${error.message}`);
+      if (error.stderr) {
+        context.log.error(`Error stderr: ${error.stderr}`);
+      }
       throw new Error(`Failed to generate diagram: ${error.message}`);
     }
   },
