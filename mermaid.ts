@@ -1,3 +1,7 @@
+// Pleaes install mermaid-cli globally using the command:
+// npm install -g @mermaid-js/mermaid-cli
+// This code is a FastMCP tool that generates diagrams from Mermaid syntax using the mermaid-cli.
+
 import { FastMCP } from "fastmcp";
 import { z } from "zod";
 import fs from "fs/promises";
