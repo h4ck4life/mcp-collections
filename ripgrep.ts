@@ -4,6 +4,8 @@ import { exec } from "child_process";
 import { promisify } from "util";
 import * as fs from "fs";
 import * as path from "path";
+import pdfParse from "pdf-parse";
+import * as mammoth from "mammoth";
 
 const execAsync = promisify(exec);
 const readFileAsync = promisify(fs.readFile);
@@ -28,6 +30,26 @@ server.addTool({
       throw new UserError(
         "Ripgrep is not installed. Please install it using package manager (brew, choco, scoop) or download from GitHub."
       );
+    }
+  },
+});
+
+// Select directory
+server.addTool({
+  name: "select-directory",
+  description: "Select a directory to search in with ripgrep",
+  parameters: z.object({
+    directory: z.string().describe("Directory path to search in"),
+  }),
+  execute: async (args) => {
+    const { directory } = args;
+
+    try {
+      // Verify the directory exists using Node.js
+      await accessAsync(directory, fs.constants.R_OK);
+      return `Directory "${directory}" selected for search.`;
+    } catch (error) {
+      throw new UserError(`Cannot access directory: ${error.message}`);
     }
   },
 });
@@ -310,7 +332,184 @@ server.addTool({
   },
 });
 
-// Add a quick reference guide as a resource
+// Extract content from document files
+server.addTool({
+  name: "extract-document-content",
+  description: "Extract text from PDF or DOCX files",
+  parameters: z.object({
+    filePath: z.string().describe("Path to the document file"),
+  }),
+  execute: async (args, { log }) => {
+    const { filePath } = args;
+
+    try {
+      // Check if the file exists and is readable
+      await accessAsync(filePath, fs.constants.R_OK);
+
+      const fileExt = path.extname(filePath).toLowerCase();
+      log.info(`Extracting content from ${fileExt} file: ${filePath}`);
+
+      // Handle different file types
+      switch (fileExt) {
+        case ".pdf":
+          return await extractPdfContent(filePath);
+
+        case ".docx":
+          return await extractDocxContent(filePath);
+
+        default:
+          throw new UserError(
+            `Unsupported file type: ${fileExt}. Supported types are: .pdf, .docx`
+          );
+      }
+    } catch (error) {
+      throw new UserError(`Failed to extract content: ${error.message}`);
+    }
+  },
+});
+
+// Search inside document files
+server.addTool({
+  name: "search-documents",
+  description: "Search content inside PDF and DOCX files",
+  parameters: z.object({
+    pattern: z.string().describe("The pattern to search for"),
+    directory: z.string().describe("Directory to search in"),
+    fileTypes: z
+      .array(z.enum(["pdf", "docx"]))
+      .describe("Document types to search"),
+  }),
+  execute: async (args, { log }) => {
+    const { pattern, directory, fileTypes } = args;
+
+    let results = "";
+    let filesSearched = 0;
+    let matchesFound = 0;
+
+    try {
+      // First find all files of specified types
+      const extensions = fileTypes.map((type) => `*.${type}`).join(",");
+      const findCmd = `rg --files --glob "{${extensions}}" "${directory}"`;
+
+      log.info(`Finding document files: ${findCmd}`);
+      const { stdout: fileList } = await execAsync(findCmd);
+
+      if (!fileList) {
+        return "No document files found in the specified directory.";
+      }
+
+      const files = fileList.split("\n").filter(Boolean);
+      log.info(`Found ${files.length} document files to search.`);
+
+      // Process each file
+      for (const file of files) {
+        filesSearched++;
+        const fileExt = path.extname(file).toLowerCase().substring(1); // remove the dot
+
+        // TypeScript-safe check for file type
+        if (!fileTypes.includes(fileExt as "pdf" | "docx")) {
+          continue;
+        }
+
+        log.info(`Searching file ${filesSearched}/${files.length}: ${file}`);
+
+        let content = "";
+        try {
+          // Type-safe switch statement
+          switch (fileExt as "pdf" | "docx") {
+            case "pdf":
+              content = await extractPdfContent(file);
+              break;
+            case "docx":
+              content = await extractDocxContent(file);
+              break;
+            default:
+              // This case should never be reached due to the check above
+              continue;
+          }
+
+          // Search for pattern in extracted content
+          const regex = new RegExp(pattern, "gi");
+          const matches = content.match(regex);
+
+          if (matches && matches.length > 0) {
+            matchesFound += matches.length;
+            results += `\n${file} (${matches.length} matches)\n`;
+
+            // Get context for matches by finding lines with matches
+            const lines = content.split("\n");
+            let matchCount = 0;
+            let contextAdded = new Set();
+
+            for (let i = 0; i < lines.length && matchCount < 5; i++) {
+              if (lines[i].match(regex)) {
+                const start = Math.max(0, i - 1);
+                const end = Math.min(lines.length - 1, i + 1);
+
+                // Only add a context once
+                const contextKey = `${start}-${end}`;
+                if (!contextAdded.has(contextKey)) {
+                  contextAdded.add(contextKey);
+                  matchCount++;
+
+                  results += `---\n`;
+                  for (let j = start; j <= end; j++) {
+                    if (j === i) {
+                      results += `> ${lines[j]}\n`;
+                    } else {
+                      results += `  ${lines[j]}\n`;
+                    }
+                  }
+                }
+              }
+            }
+
+            if (matches.length > 5) {
+              results += `... and ${matches.length - 5} more matches\n`;
+            }
+          }
+        } catch (error) {
+          results += `\nError processing ${file}: ${error.message}\n`;
+        }
+      }
+
+      if (matchesFound === 0) {
+        return `Searched ${filesSearched} files. No matches found.`;
+      }
+
+      return `Searched ${filesSearched} files. Found ${matchesFound} matches:\n${results}`;
+    } catch (error) {
+      throw new UserError(`Document search failed: ${error.message}`);
+    }
+  },
+});
+
+// Helper function to extract PDF content
+async function extractPdfContent(filePath: string): Promise<string> {
+  try {
+    const dataBuffer = await readFileAsync(filePath);
+    const options = {
+      // Suppress console warnings that might break JSON-RPC
+      pagerender: () => "",
+    };
+    const data = await pdfParse(dataBuffer, options);
+    return data.text || "No text content found in PDF";
+  } catch (error: any) {
+    throw new Error(`PDF extraction error: ${error.message}`);
+  }
+}
+
+// Helper function to extract DOCX content
+async function extractDocxContent(filePath: string): Promise<string> {
+  try {
+    const result = await mammoth.extractRawText({ path: filePath });
+    return result.value || "No text content found in DOCX";
+  } catch (error: any) {
+    throw new Error(`DOCX extraction error: ${error.message}`);
+  }
+}
+
+// Add reference guide
 server.addResource({
   uri: "file:///help/ripgrep.md",
   name: "Ripgrep Quick Reference",
