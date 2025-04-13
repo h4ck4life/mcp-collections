@@ -488,11 +488,7 @@ server.addTool({
 async function extractPdfContent(filePath: string): Promise<string> {
   try {
     const dataBuffer = await readFileAsync(filePath);
-    const options = {
-      // Suppress console warnings that might break JSON-RPC
-      pagerender: () => "",
-    };
-    const data = await pdfParse(dataBuffer, options);
+    const data = await pdfParse(dataBuffer);
     return data.text || "No text content found in PDF";
   } catch (error: any) {
     throw new Error(`PDF extraction error: ${error.message}`);
