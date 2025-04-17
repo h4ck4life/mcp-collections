@@ -55,7 +55,7 @@ server.addTool({
   }),
   execute: async (args, context) => {
     try {
-      const baseUrl = "https://www.reddit.com/search.json";
+      const baseUrl = "https://oauth.reddit.com/search.json";
       const url = new URL(baseUrl);
 
       // Add all provided parameters to the URL
@@ -285,7 +285,7 @@ server.addTool({
   }),
   execute: async (args, context) => {
     try {
-      const baseUrl = `https://www.reddit.com/comments/${args.postId}.json`;
+      const baseUrl = `https://oauth.reddit.com/comments/${args.postId}.json`;
       const url = new URL(baseUrl);
 
       // Add parameters
@@ -467,7 +467,7 @@ server.addTool({
   }),
   execute: async (args, context) => {
     try {
-      const baseUrl = `https://www.reddit.com/${args.postId}.json`;
+      const baseUrl = `https://oauth.reddit.com/${args.postId}.json`;
       const url = new URL(baseUrl);
 
       context.log.info("Making request to Reddit API for post details", {
