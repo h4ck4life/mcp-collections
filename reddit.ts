@@ -80,7 +80,8 @@ server.addTool({
             timeout: 60000, // 60 second timeout
             validateStatus: null, // Don't throw on any status code
             headers: {
-              "User-Agent": "FastMCP-Reddit-Search/1.0.0",
+              "User-Agent":
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_3) AppleWebKit/604.1.38 (KHTML, like Gecko) Version/15.2 Safari/604.1.38",
             },
           });
 
@@ -308,7 +309,8 @@ server.addTool({
             timeout: 60000,
             validateStatus: null,
             headers: {
-              "User-Agent": "FastMCP-Reddit-Comments/1.0.0",
+              "User-Agent":
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_3) AppleWebKit/604.1.38 (KHTML, like Gecko) Version/15.2 Safari/604.1.38",
             },
             maxRedirects: 5,
           });
@@ -486,7 +488,8 @@ server.addTool({
             timeout: 60000,
             validateStatus: null,
             headers: {
-              "User-Agent": "FastMCP-Reddit-Post/1.0.0",
+              "User-Agent":
+                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_3) AppleWebKit/604.1.38 (KHTML, like Gecko) Version/15.2 Safari/604.1.38",
             },
             maxRedirects: 5, // Follow redirects
           });
