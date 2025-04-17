@@ -1,0 +1,30 @@
+{
+  "mcpServers": {
+    "@smithery-ai-brave-search": {
+      "command": "npx",
+      "args": [
+        "-y",
+        "@smithery/cli@latest",
+        "run",
+        "@smithery-ai/brave-search",
+        "--config",
+        "\"{\\\"braveApiKey\\\":\\\"BSAzqVgq\\\"}\""
+      ]
+    },
+    "youtube": {
+      "command": "npx",
+      "args": ["-y", "tsx", "/root/apps/mcp-collections/youtube.ts"],
+      "env": {
+        "YOUTUBE_API_KEY": "A57UxrVqus"
+      }
+    },
+    "reddit": {
+      "command": "npx",
+      "args": ["-y", "tsx", "/root/apps/mcp-collections/reddit.ts"]
+    },
+    "hacker-news": {
+      "command": "npx",
+      "args": ["-y", "tsx", "/root/apps/mcp-collections/hacker-news.ts"]
+    }
+  }
+}

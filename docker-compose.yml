@@ -1,0 +1,18 @@
+version: '3'
+
+services:
+  mcpo:
+    image: ghcr.io/open-webui/mcpo:main
+    #ports:
+    #  - "8000:8000"
+    volumes:
+      - ./:/root/apps/mcp-collections/
+    working_dir: /root/apps/mcp-collections/
+    command: --config mcp_config.json
+    restart: unless-stopped
+    networks:
+      - nginxmanager_default
+
+networks:
+  nginxmanager_default:
+    external: true
