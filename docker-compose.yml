@@ -1,4 +1,4 @@
-version: '3'
+version: "3"
 
 services:
   mcpo:
@@ -9,7 +9,7 @@ services:
       - ./:/root/apps/mcp-collections/
     working_dir: /root/apps/mcp-collections/
     command: --config mcp_config.json
-    restart: unless-stopped
+    restart: always
     networks:
       - nginxmanager_default
 
