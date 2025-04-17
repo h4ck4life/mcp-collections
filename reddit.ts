@@ -76,12 +76,12 @@ server.addTool({
 
       while (retries < maxRetries) {
         try {
+          // Use the exact same headers that work with curl
           response = await axios.get(url.toString(), {
-            timeout: 60000, // 60 second timeout
-            validateStatus: null, // Don't throw on any status code
+            timeout: 60000,
+            validateStatus: null,
             headers: {
-              "User-Agent":
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_3) AppleWebKit/604.1.38 (KHTML, like Gecko) Version/15.2 Safari/604.1.38",
+              "User-Agent": "Mozilla/5.0 (compatible; FastMCPBot/1.0)",
             },
           });
 
@@ -96,15 +96,16 @@ server.addTool({
             );
           }
 
-          break; // Successful response, exit retry loop
+          break;
         } catch (error) {
           retries++;
 
-          // Log error information
+          // Log detailed error information
           if (error.response) {
             context.log.error("API Error details", {
               status: error.response.status,
               statusText: error.response.statusText,
+              data: error.response.data,
             });
           } else if (error.request) {
             context.log.error("No response received", {
@@ -116,23 +117,16 @@ server.addTool({
             });
           }
 
-          context.log.warn(
-            `Request failed (attempt ${retries}/${maxRetries})`,
-            {
-              error: error.message,
-            }
-          );
-
           if (retries >= maxRetries) {
-            throw error; // Rethrow if max retries reached
+            throw error;
           }
 
-          // Wait before retry (exponential backoff)
-          const delay = 1000 * Math.pow(2, retries - 1); // 1s, 2s, 4s...
+          const delay = 1000 * Math.pow(2, retries - 1);
           await new Promise((resolve) => setTimeout(resolve, delay));
         }
       }
 
+      // Rest of function remains the same
       if (!response || !response.data) {
         throw new UserError("No response received from Reddit API");
       }
@@ -160,10 +154,7 @@ server.addTool({
         };
       }
 
-      context.log.info("Retrieved results", {
-        count: response.data.data.children.length,
-      });
-
+      // Process results as before
       const results = response.data.data.children.map((item) => {
         const data = item.data;
         return {
@@ -192,11 +183,6 @@ server.addTool({
         };
       });
 
-      context.reportProgress({
-        progress: 100,
-        total: 100,
-      });
-
       return {
         content: [
           {
@@ -221,7 +207,7 @@ server.addTool({
         ],
       };
     } catch (error) {
-      // Error logging
+      // Error handling remains the same
       context.log.error("Failed to search Reddit", {
         error: error.message,
         stack: error.stack,
@@ -232,7 +218,6 @@ server.addTool({
         throw error;
       }
 
-      // Specific error messages for different status codes
       if (error.response) {
         const status = error.response.status;
         if (status === 500) {
@@ -259,6 +244,7 @@ server.addTool({
   },
 });
 
+// Update the other tools similarly
 server.addTool({
   name: "getRedditComments",
   description: "Get comments for a specific Reddit post",
@@ -298,7 +284,7 @@ server.addTool({
         postId: args.postId,
       });
 
-      // Add retry logic
+      // Same implementation as searchReddit
       const maxRetries = 3;
       let retries = 0;
       let response;
@@ -309,8 +295,7 @@ server.addTool({
             timeout: 60000,
             validateStatus: null,
             headers: {
-              "User-Agent":
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_3) AppleWebKit/604.1.38 (KHTML, like Gecko) Version/15.2 Safari/604.1.38",
+              "User-Agent": "Mozilla/5.0 (compatible; FastMCPBot/1.0)",
             },
             maxRedirects: 5,
           });
@@ -330,11 +315,11 @@ server.addTool({
         } catch (error) {
           retries++;
 
-          // Log error information
           if (error.response) {
             context.log.error("API Error details", {
               status: error.response.status,
               statusText: error.response.statusText,
+              data: error.response.data,
             });
           } else {
             context.log.error("Request error", {
@@ -351,6 +336,7 @@ server.addTool({
         }
       }
 
+      // Rest of function remains the same
       if (
         !response ||
         !response.data ||
@@ -360,11 +346,10 @@ server.addTool({
         throw new UserError("Invalid response from Reddit API");
       }
 
-      // First item in array is the post, second is the comments
+      // Process response as before
       const post = response.data[0].data.children[0].data;
       const comments = response.data[1].data.children;
 
-      // Process comments recursively
       function processComments(comments) {
         return comments.map((comment) => {
           if (comment.kind === "more") {
@@ -396,11 +381,6 @@ server.addTool({
       }
 
       const processedComments = processComments(comments);
-
-      context.reportProgress({
-        progress: 100,
-        total: 100,
-      });
 
       return {
         content: [
@@ -477,7 +457,6 @@ server.addTool({
         postId: args.postId,
       });
 
-      // Add retry logic
       const maxRetries = 3;
       let retries = 0;
       let response;
@@ -488,10 +467,9 @@ server.addTool({
             timeout: 60000,
             validateStatus: null,
             headers: {
-              "User-Agent":
-                "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_8_3) AppleWebKit/604.1.38 (KHTML, like Gecko) Version/15.2 Safari/604.1.38",
+              "User-Agent": "Mozilla/5.0 (compatible; FastMCPBot/1.0)",
             },
-            maxRedirects: 5, // Follow redirects
+            maxRedirects: 5,
           });
 
           context.log.info("API Response received", {
@@ -513,6 +491,7 @@ server.addTool({
             context.log.error("API Error details", {
               status: error.response.status,
               statusText: error.response.statusText,
+              data: error.response.data,
             });
           } else {
             context.log.error("Request error", {
@@ -529,21 +508,19 @@ server.addTool({
         }
       }
 
+      // Rest of function remains the same
       if (!response || !response.data) {
         throw new UserError("No response received from Reddit API");
       }
 
-      // The response format may vary depending on whether the request was redirected
       let post;
       if (Array.isArray(response.data) && response.data.length > 0) {
-        // This is the format when accessing /comments/postId.json
         post = response.data[0].data.children[0].data;
       } else if (
         response.data.data &&
         response.data.data.children &&
         response.data.data.children.length > 0
       ) {
-        // This is the format when accessing a direct post
         post = response.data.data.children[0].data;
       } else {
         throw new UserError("Invalid response format from Reddit API");
@@ -552,11 +529,6 @@ server.addTool({
       if (!post) {
         throw new UserError(`Post with ID ${args.postId} not found`);
       }
-
-      context.reportProgress({
-        progress: 100,
-        total: 100,
-      });
 
       return {
         content: [
