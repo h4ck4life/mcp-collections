@@ -2,11 +2,13 @@ version: "3"
 
 services:
   mcpo:
-    image: ghcr.io/open-webui/mcpo:main
+    build: .
+    #image: ghcr.io/open-webui/mcpo:main
     #ports:
     #  - "8000:8000"
     volumes:
-      - ./:/root/apps/mcp-collections/
+      - ./:/root/apps/mcp-collections
+      - ../reddit_mcp_server_go:/root/apps/reddit_mcp_server_go
     working_dir: /root/apps/mcp-collections/
     command: --config mcp_config.json
     restart: always
